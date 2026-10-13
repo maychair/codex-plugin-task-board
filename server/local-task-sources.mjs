@@ -48,6 +48,7 @@ function taskFromSource(task, source, session, format) {
     blocker: task.blocker || task.blockedReason || "",
     acceptanceCriteria: strings(task.acceptanceCriteria),
     delivery: task.delivery && { state: task.delivery.state },
+    reviewUrl: task.mergeRequest?.url || task.pullRequest?.url || "",
     acceptanceRecord: task.acceptance,
     startDispatch: task.startDispatch,
     interaction: interaction && typeof interaction.question === "string"

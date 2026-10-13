@@ -12,6 +12,8 @@ Cards open a detail dialog with blocker/dependency status, acceptance criteria/r
 
 The view polls every five seconds and supports project/source/search filters and expandable evidence. Desktop columns share the available width; narrow views scroll horizontally.
 
+Development deliveries create or reuse a GitLab MR (`mergeRequest.url`) or GitHub PR (`pullRequest.url`) in the task contract or ledger item. Task details then offer a Code Review button that opens that request in Codex's existing sidebar Code Review plugin. See [the delivery contract](docs/local-task-code-review.md).
+
 ## Task hierarchy
 
 Only explicit top-level contracts become board cards. Worker ledgers are attached through an optional absolute `childLedgerPath` on the contract source, and appear as internal execution steps in the parent detail. Child completion/review does not change the parent status. The parent owns user interaction and acceptance. The attached ledger must have schema_version 1 and the same coordinator_thread as the saved parent binding.
