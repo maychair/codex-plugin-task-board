@@ -1494,28 +1494,6 @@
       void openThread(message.payload);
       return;
     }
-    if (message.type === "taskboard:open-code-review") {
-      const url = message.payload?.url;
-      try {
-        const target = new URL(url);
-        if (!["https:", "http:"].includes(target.protocol) || target.username || target.password
-          || !(/^\/.+\/-\/merge_requests\/[1-9]\d*\/?$/.test(target.pathname)
-            || /^\/[^/]+\/[^/]+\/pull\/[1-9]\d*\/?$/.test(target.pathname))) return;
-        closeTaskboard(false);
-        dispatchHostMessage({
-          type: "navigate-to-route",
-          path: `/mcp-app/code-review/pull_requests.open#${new URLSearchParams({ pullRequest: target.href })}`,
-          state: {
-            sidebarArea: "code-review",
-            mcpAppDeepLink: {
-              path: ["pull-request"],
-              query: [["url", target.href], ["navigation", crypto.randomUUID()]],
-            },
-          },
-        });
-      } catch (_) {}
-      return;
-    }
     if (message.type === "taskboard:expand-sidebar") {
       expandNativeSidebar();
       return;

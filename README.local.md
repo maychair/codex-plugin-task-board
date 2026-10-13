@@ -12,7 +12,7 @@ Cards open a detail dialog with blocker/dependency status, acceptance criteria/r
 
 The view polls every five seconds and supports project/source/search filters and expandable evidence. Desktop columns share the available width; narrow views scroll horizontally.
 
-Development deliveries create or reuse a GitLab MR (`mergeRequest.url`) or GitHub PR (`pullRequest.url`) in the task contract or ledger item. Task details then offer a Code Review button that opens that request in Codex's existing sidebar Code Review plugin. See [the delivery contract](docs/local-task-code-review.md).
+Development deliveries create or reuse a GitLab MR (`mergeRequest.url`) or GitHub PR (`pullRequest.url`) in the task contract or ledger item. Task details offer a View PR / MR button that opens the repository website. `scripts/watch-task-merges.mjs` polls linked requests through authenticated gh / glab and applies an explicitly configured merged-task status. See [the delivery contract](docs/local-task-code-review.md).
 
 ## Task hierarchy
 

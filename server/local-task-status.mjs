@@ -1,4 +1,5 @@
-import { readFile, writeFile, rename } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { updateLocalTaskContract } from "./local-task-contract.mjs";
 import { readLocalTaskSources } from "./local-task-sources.mjs";
 import { createLocalTaskReplyHandler, validateLocalTaskReply } from "./local-task-reply.mjs";
 
@@ -56,12 +57,7 @@ export function createLocalTaskStatusHandler({ rpc, readSources = readLocalTaskS
       let document = JSON.parse(await readFile(task.sourcePath, "utf8"));
       if (document.taskId !== task.id) throw new Error("任务 contract 身份已变化");
       const save = async (updates) => {
-        const current = JSON.parse(await readFile(task.sourcePath, "utf8"));
-        if (current.taskId !== task.id) throw new Error("任务 contract 身份已变化");
-        const temporary = `${task.sourcePath}.${request.requestId}.tmp`;
-        document = { ...current, ...updates };
-        await writeFile(temporary, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 });
-        await rename(temporary, task.sourcePath);
+        document = await updateLocalTaskContract(task.sourcePath, task.id, () => updates);
       };
       if (request.status !== "running") {
         if (request.status === "done") {
@@ -131,7 +127,7 @@ export function createLocalTaskStatusHandler({ rpc, readSources = readLocalTaskS
         `明确范围：${JSON.stringify(document.scope || "以任务目标和验收标准为边界")}`,
         `验收标准：\n${task.acceptanceCriteria.join("\n")}`,
         ...(["feature", "fix", "refactor"].includes(document.changeType) ? [
-          "开发交付：实现并验证后，在任务所属仓库创建或复用本任务审查请求。GitLab 使用 MR，并保存任务契约 mergeRequest.url；GitHub 使用 PR，并保存 pullRequest.url，供用户在 Codex 原生代码审查中检查。缺少远端或发布权限时登记缺失条件；不得用其他项目的审查请求代替，不自动合并或标记验收。",
+          "开发交付：实现并验证后，在任务所属仓库创建或复用本任务审查请求。GitLab 使用 MR，并保存任务契约 mergeRequest.url；GitHub 使用 PR，并保存 pullRequest.url，供用户直接在仓库中审查。缺少远端或发布权限时登记缺失条件；不得用其他项目的审查请求代替，不自动合并或标记验收。",
         ] : []),
         `既有实质条件：${gate?.releaseCondition || "遵守合同中其他执行条件"}。本次拖动授予执行权限，不证明输入和资源已就绪；执行前仍需核实。`,
         `下一步：${task.next}`, "现在开始或继续执行以上绑定任务。遵守项目规则及其他实质执行门槛；不得扩展范围，不得自行标记已验收。",
