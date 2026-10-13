@@ -11,6 +11,8 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+import { createLocalTaskStatusHandler } from "../server/local-task-status.mjs";
+import { createLocalTaskReplyHandler } from "../server/local-task-reply.mjs";
 import { resolvePort } from "../server/app.mjs";
 import { resolveCodexExecutable } from "../shared/codex-executable.mjs";
 import { withoutTaskboardLauncherEnvironment } from "../shared/codex-environment.mjs";
@@ -1200,6 +1202,20 @@ async function requestCodexAutomationViaCdp(cdp, executionContextId, method, par
     throw new Error("Codex automation request returned invalid JSON");
   }
 }
+
+const changeLocalTaskStatus = createLocalTaskStatusHandler({
+  rpc: async (hostId, method, params, connection) => {
+    if (!connection || connection.closed) throw new Error("Codex 对话连接不可用");
+    return requestCodexAppServerViaCdp(connection, undefined, hostId, method, params);
+  },
+});
+
+const replyToLocalTask = createLocalTaskReplyHandler({
+  rpc: async (hostId, method, params, connection) => {
+    if (!connection || connection.closed) throw new Error("Codex 对话连接不可用");
+    return requestCodexAppServerViaCdp(connection, undefined, hostId, method, params);
+  },
+});
 
 async function requestCodexAppServerViaCdp(
   cdp,
@@ -2522,6 +2538,8 @@ function installTaskboardHostBinding(
         request.frameName,
         request.frameCapability,
       ),
+      changeLocalTaskStatus: (request) => changeLocalTaskStatus(request, cdp),
+      replyToLocalTask: (request) => replyToLocalTask(request, cdp),
       openExternal: openExternalUrl,
       openAttachment,
       runAutomation: (request) => (

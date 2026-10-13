@@ -45,6 +45,7 @@ import { TaskboardDatabase } from "./database.mjs";
 import { createJiraConfigStore } from "./jira-config.mjs";
 import { createJiraIntegration } from "./jira-integration.mjs";
 import { ProjectSummaryService } from "./project-summary.mjs";
+import { readLocalTaskSources } from "./local-task-sources.mjs";
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const execFileAsync = promisify(execFile);
@@ -1786,6 +1787,7 @@ export function createTaskboardServer(options = {}) {
         configuredTrustedRequest
         && (
           pathname.startsWith("/api/local/")
+          || pathname === "/api/local-tasks"
           || pathname === "/api/device-workspaces"
           || isDevelopmentContextsRoute
         )
@@ -1798,7 +1800,7 @@ export function createTaskboardServer(options = {}) {
       }
       if (isLocalAiRoute) {
         assertAiLoopbackRequest(request);
-      } else if (pathname.startsWith("/api/local/")) {
+      } else if (pathname.startsWith("/api/local/") || pathname === "/api/local-tasks") {
         assertLoopbackRequest(request);
       }
       const isMachineCapabilityRoute = pathname === "/api/meta"
@@ -1826,6 +1828,12 @@ export function createTaskboardServer(options = {}) {
           });
         }
         return sendJson(response, 200, { status: "ok" });
+      }
+
+      if (pathname === "/api/local-tasks") {
+        if (request.method !== "GET") return methodNotAllowed(response, ["GET"]);
+        assertNoQuery(url.searchParams, "GET /api/local-tasks");
+        return sendJson(response, 200, await readLocalTaskSources());
       }
 
       if (pathname === "/api/client-storage") {

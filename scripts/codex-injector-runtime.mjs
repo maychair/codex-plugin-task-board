@@ -1,3 +1,7 @@
+import { validateLocalTaskReply } from "../server/local-task-reply.mjs";
+
+import { validateLocalTaskStatus } from "../server/local-task-status.mjs";
+
 const HOST_REQUEST_ERROR = "自动认领配置暂时无法应用，请刷新后重试";
 const AUTOMATION_SCHEMA_DIAGNOSTIC = "AUTOMATION_SCHEMA_MISMATCH";
 
@@ -19,6 +23,17 @@ function parseHostRequest(payload, parseAutomationRequest) {
     && /^[a-z0-9-]{1,80}$/i.test(request.id)
   ) ? request.id : null;
   if (!id) return { id: null, request: null, error: HOST_REQUEST_ERROR };
+  if (request.action === "local-task-status") {
+    try { return { id, request: { ...validateLocalTaskStatus(request), id, action: request.action }, error: null }; }
+    catch (error) { return { id, request: null, error: error.message }; }
+  }
+  if (request.action === "local-task-reply") {
+    try {
+      return { id, request: { ...validateLocalTaskReply(request), id, action: request.action }, error: null };
+    } catch (error) {
+      return { id, request: null, error: error.message };
+    }
+  }
   if (request.action === "ensure") return { id, request, error: null };
   if (request.action === "read-current-user") return { id, request, error: null };
   if (
@@ -124,6 +139,10 @@ export async function handleHostBindingPayload(params, handlers) {
       result = await handlers.openExternal(parsed.request);
     } else if (parsed.request.action === "open-attachment") {
       result = await handlers.openAttachment(parsed.request);
+    } else if (parsed.request.action === "local-task-status") {
+      result = await handlers.changeLocalTaskStatus(parsed.request);
+    } else if (parsed.request.action === "local-task-reply") {
+      result = await handlers.replyToLocalTask(parsed.request);
     } else if (parsed.request.action === "automation") {
       result = await handlers.runAutomation(parsed.request, params.executionContextId);
     } else {

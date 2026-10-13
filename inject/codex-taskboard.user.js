@@ -1468,6 +1468,28 @@
       updateDragRegion(message.payload);
       return;
     }
+    if (message.type === "taskboard:local-task-status") {
+      const requestId = message.payload?.requestId;
+      void requestHost("local-task-status", message.payload, 90_000).then((result) => {
+        postToFrame({ type: "taskboard:local-task-status-result", payload: { requestId, ok: true, ...result } });
+      }).catch((error) => {
+        postToFrame({ type: "taskboard:local-task-status-result", payload: { requestId, ok: false, error: error.message, uncertain: error.uncertain === true } });
+      });
+      return;
+    }
+    if (message.type === "taskboard:local-task-reply") {
+      const requestId = message.payload?.requestId;
+      void requestHost("local-task-reply", message.payload, 90_000).then((result) => {
+        postToFrame({ type: "taskboard:local-task-reply-result", payload: { requestId, ok: true, ...result } });
+      }).catch((error) => {
+        postToFrame({ type: "taskboard:local-task-reply-result", payload: {
+          requestId, ok: false, error: error.message,
+          ...(error.threadId ? { threadId: error.threadId } : {}),
+          ...(error.uncertain ? { uncertain: true } : {}),
+        } });
+      });
+      return;
+    }
     if (message.type === "taskboard:open-thread") {
       void openThread(message.payload);
       return;
@@ -1726,7 +1748,7 @@
         : window.setTimeout(() => {
           hostRequests.delete(id);
           const error = hostError("任务面板启动器没有响应", "The Taskboard launcher did not respond");
-          if (action === "start-task-conversation") error.uncertain = true;
+          if (action === "start-task-conversation" || action === "local-task-reply" || action === "local-task-status") error.uncertain = true;
           reject(error);
         }, timeoutMs);
       hostRequests.set(id, { resolve, reject, timeout });
