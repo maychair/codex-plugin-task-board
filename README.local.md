@@ -17,3 +17,5 @@ Development deliveries create or reuse a GitLab MR (`mergeRequest.url`) or GitHu
 ## Task hierarchy
 
 Only explicit top-level contracts become board cards. Worker ledgers are attached through an optional absolute `childLedgerPath` on the contract source, and appear as internal execution steps in the parent detail. Child completion/review does not change the parent status. The parent owns user interaction and acceptance. The attached ledger must have schema_version 1 and the same coordinator_thread as the saved parent binding.
+
+Task lifecycle events and dependency wakeups are maintained in [the local task state machine](docs/local-task-state-machine.md). The native bridge scans blocked dependency tasks every 10 seconds and starts the bound session after usable deliveries and execution gates pass, saving running only after a native receipt.

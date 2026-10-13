@@ -7,6 +7,8 @@ import { setTimeout } from "node:timers/promises";
 import { readLocalTaskSources } from "../server/local-task-sources.mjs";
 import { updateLocalTaskContract } from "../server/local-task-contract.mjs";
 
+import { taskTransition } from "../server/local-task-state.mjs";
+
 const execute = promisify(execFile);
 
 export function repositoryRequest(rawUrl) {
@@ -47,7 +49,7 @@ export async function recordTaskMerge(task, merge, mergedStatus) {
     changed = true;
     const recordedAt = new Date().toISOString();
     return {
-      status: mergedStatus,
+      status: taskTransition("repository-merged", mergedStatus),
       repositorySync: { ...merge, recordedAt, mergedStatus },
       statusChange: { requestedAt: recordedAt, status: mergedStatus, kind: "repository-merged" },
       ...(mergedStatus === "done" ? {

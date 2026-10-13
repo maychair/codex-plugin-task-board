@@ -2638,7 +2638,14 @@ function installTaskboardHostBinding(
     }
   }
 
+  let nextDependencyScan = 0;
   async function publishHeartbeat() {
+    if (Date.now() >= nextDependencyScan) {
+      nextDependencyScan = Date.now() + 10_000;
+      void changeLocalTaskStatus.reconcile(cdp).then((results) => {
+        for (const result of results) console.log(JSON.stringify({ dependencyRelease: result }));
+      }).catch((error) => console.error(`Dependency scan: ${error.message}`));
+    }
     let timeout;
     try {
       await Promise.race([
