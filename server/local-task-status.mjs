@@ -130,6 +130,9 @@ export function createLocalTaskStatusHandler({ rpc, readSources = readLocalTaskS
         `任务目标：${task.goal}`, `工作树 / 范围：${task.worktree || task.workspacePath}`,
         `明确范围：${JSON.stringify(document.scope || "以任务目标和验收标准为边界")}`,
         `验收标准：\n${task.acceptanceCriteria.join("\n")}`,
+        ...(["feature", "fix", "refactor"].includes(document.changeType) ? [
+          "开发交付：实现并验证后，在任务所属仓库创建或复用本任务审查请求。GitLab 使用 MR，并保存任务契约 mergeRequest.url；GitHub 使用 PR，并保存 pullRequest.url，供用户在 Codex 原生代码审查中检查。缺少远端或发布权限时登记缺失条件；不得用其他项目的审查请求代替，不自动合并或标记验收。",
+        ] : []),
         `既有实质条件：${gate?.releaseCondition || "遵守合同中其他执行条件"}。本次拖动授予执行权限，不证明输入和资源已就绪；执行前仍需核实。`,
         `下一步：${task.next}`, "现在开始或继续执行以上绑定任务。遵守项目规则及其他实质执行门槛；不得扩展范围，不得自行标记已验收。",
       ].join("\n");

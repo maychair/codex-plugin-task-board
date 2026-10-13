@@ -13,6 +13,7 @@ interface LocalTask {
   projectName: string;
   workspacePath: string;
   worktree: string;
+  reviewUrl?: string;
   dependencies: string[];
   children?: LocalTask[];
   dependencyDetails?: { id: string; status: string; title: string }[];
@@ -350,6 +351,7 @@ export function LocalTaskBoard() {
               <div className="local-task-detail-actions">
                 <button type="button" className="local-task-reply-primary" disabled={!selected.session || !reply.trim() || sending || uncertainReplyKeys.includes(selectedKey)} onClick={() => sendReply(selected)}>{sending ? "发送中…" : "发送回复"}</button>
                 <button type="button" disabled={!selected.session || sending} onClick={() => openConversation(selected)}>打开{selected.sessionKind === "coordinator" ? " Coordinator 对话" : "任务对话"} ↗</button>
+                {selected.reviewUrl && <button type="button" onClick={() => postEmbeddedHostMessage({ type: "taskboard:open-code-review", payload: { url: selected.reviewUrl } })}>代码审查 ↗</button>}
               </div>
               {replyNotice && <p role="status">{replyNotice}</p>}
               {!selected.session && <p>未保存完整 session 绑定，无法打开所属对话。</p>}
