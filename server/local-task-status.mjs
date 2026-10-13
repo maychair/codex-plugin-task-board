@@ -1,22 +1,11 @@
-import { readFile, writeFile, rename } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { updateLocalTaskContract } from "./local-task-contract.mjs";
 import { readLocalTaskSources } from "./local-task-sources.mjs";
 import { createLocalTaskReplyHandler, validateLocalTaskReply } from "./local-task-reply.mjs";
 
-const statuses = ["ready", "running", "blocked", "review", "completed", "failed", "done"];
+import { taskStatuses, taskTransition, accepted, usable, dependenciesReady } from "./local-task-state.mjs";
+import { randomUUID } from "node:crypto";
 const sixCases = ["M01", "M02", "M03", "M04", "M05", "M06"];
-
-function accepted(task) {
-  if (task.delivery?.state === "accepted") return true;
-  const record = task.acceptanceRecord ?? task.acceptance;
-  if (typeof record === "string") return !!record.trim();
-  if (Array.isArray(record)) return record.some((entry) => typeof entry === "string" && !!entry.trim());
-  return record?.state === "accepted" || record?.status === "accepted" || record?.accepted === true;
-}
-
-function usable(task) {
-  return task.status === "done" ? accepted(task)
-    : task.status === "completed" && ["accepted", "usable"].includes(task.delivery?.state);
-}
 
 // These are the existing Qwen contracts' authorization clauses, not a general
 // parser for arbitrary release conditions. Unknown closed gates remain closed.
@@ -31,7 +20,7 @@ function dragOpensAuthorization(gate) {
 }
 export function validateLocalTaskStatus(value) {
   validateLocalTaskReply({ ...value, reply: "status" });
-  if (!statuses.includes(value.status)) throw new Error("任务状态请求无效");
+  if (!taskStatuses.includes(value.status)) throw new Error("任务状态请求无效");
   if (value.confirmAcceptance !== undefined && typeof value.confirmAcceptance !== "boolean") throw new Error("验收确认无效");
   return { requestId: value.requestId, sourceId: value.sourceId, taskId: value.taskId, status: value.status, confirmAcceptance: value.confirmAcceptance === true };
 }
@@ -40,7 +29,7 @@ export function createLocalTaskStatusHandler({ rpc, readSources = readLocalTaskS
   const reply = createLocalTaskReplyHandler({ rpc, readSources });
   const operations = new Map();
   let writes = Promise.resolve();
-  return (value, context) => {
+  const changeStatus = (value, context, { automatic = false } = {}) => {
     const request = validateLocalTaskStatus(value);
     const identity = JSON.stringify(request);
     const previous = operations.get(request.requestId);
@@ -55,19 +44,16 @@ export function createLocalTaskStatusHandler({ rpc, readSources = readLocalTaskS
       const task = matches[0];
       let document = JSON.parse(await readFile(task.sourcePath, "utf8"));
       if (document.taskId !== task.id) throw new Error("任务 contract 身份已变化");
+      if (automatic && (document.status !== "blocked" || !dependenciesReady(task, snapshot.tasks)
+        || document.startDispatch && document.startDispatch.state !== "received")) return { skipped: true };
       const save = async (updates) => {
-        const current = JSON.parse(await readFile(task.sourcePath, "utf8"));
-        if (current.taskId !== task.id) throw new Error("任务 contract 身份已变化");
-        const temporary = `${task.sourcePath}.${request.requestId}.tmp`;
-        document = { ...current, ...updates };
-        await writeFile(temporary, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 });
-        await rename(temporary, task.sourcePath);
+        document = await updateLocalTaskContract(task.sourcePath, task.id, () => updates);
       };
       if (request.status !== "running") {
         if (request.status === "done") {
           if (!request.confirmAcceptance && !accepted(document)) throw new Error("请在看板内确认验收后再移到已验收");
           const acceptedAt = new Date().toISOString();
-          await save({ status: "done", blocker: "",
+          await save({ status: taskTransition("user-acceptance"), blocker: "",
             ...(request.confirmAcceptance ? {
               acceptance: document.acceptance || `用户于 ${acceptedAt} 在本地任务看板确认验收通过。`,
               userAcceptance: { state: "accepted", acceptedAt, via: "board-drag-confirmation", requestId: request.requestId, taskId: task.id, sourceId: task.sourceId, threadId: task.session.threadId },
@@ -77,20 +63,20 @@ export function createLocalTaskStatusHandler({ rpc, readSources = readLocalTaskS
           });
           return { status: "done", notice: "已保存你的验收确认，任务已移到已验收。" };
         }
-        await save({ status: request.status, statusChange: { requestedAt: new Date().toISOString(), status: request.status, kind: "user-record-only" } });
+        await save({ status: taskTransition("user-record-only", request.status), statusChange: { requestedAt: new Date().toISOString(), status: request.status, kind: "user-record-only" } });
         return { status: request.status, notice: "已更新任务记录；未停止 session，未生成执行结果或验收证据。" };
       }
       if (document.startDispatch && (document.startDispatch.state !== "received" || document.status === "running")) {
         return { status: document.status, notice: "已有启动记录；请打开所属对话核实。本次未重复启动。" };
       }
       const authorization = {
-        kind: "board-drag", requestId: request.requestId, taskId: task.id,
+        kind: automatic ? "dependency-release-policy" : "board-drag", requestId: request.requestId, taskId: task.id,
         sourceId: task.sourceId, threadId: task.session.threadId,
         authorizedAt: new Date().toISOString(), scope: document.scope || task.goal,
       };
       const requiresSixCases = /M01[～~-]M06\s*全部验收/.test(`${document.executionGate?.releaseCondition || ""} ${document.blocker || ""}`)
         || sixCases.every((id) => document.executionGate?.requiredAcceptedTasks?.includes(id));
-      await save({ executionAuthorization: authorization,
+      if (!automatic) await save({ executionAuthorization: authorization,
         ...(requiresSixCases ? { executionGate: { ...document.executionGate, requiredAcceptedTasks: sixCases } } : {}),
       });
       const blockers = [];
@@ -118,35 +104,60 @@ export function createLocalTaskStatusHandler({ rpc, readSources = readLocalTaskS
         blockers.push(`实质执行门槛未开放：${gate.reason || gate.releaseCondition || gate.state}`);
       }
       if (blockers.length) {
-        await save({ status: "blocked", blocker: blockers.join("；") });
+        if (automatic) return { skipped: true };
+        await save({ status: taskTransition("dependencies-blocked"), blocker: blockers.join("；") });
         return { status: "blocked", notice: blockers.join("；") };
       }
       const dispatch = { requestId: request.requestId, state: "pending", requestedAt: new Date().toISOString(), threadId: task.session.threadId };
-      await save({ status: "blocked", blocker: "正在等待绑定 session 的启动回执", startDispatch: dispatch,
+      await save({ status: taskTransition("start-requested"), blocker: "正在等待绑定 session 的启动回执", startDispatch: dispatch,
+        ...(automatic ? { executionAuthorization: authorization } : {}),
         ...(gate && dragOpensAuthorization(gate) ? { executionGate: { ...gate, state: "open", releaseEvidence: authorization } } : {}),
       });
       const instruction = [
-        "用户已在本地任务看板将本任务拖到进行中，授权本任务范围内的后续执行。",
+        automatic
+          ? "用户已授权依赖全部完成后自动恢复执行。本任务依赖现已就绪，现在启动或继续绑定 session。"
+          : "用户已在本地任务看板将本任务拖到进行中，授权本任务范围内的后续执行。",
         `任务目标：${task.goal}`, `工作树 / 范围：${task.worktree || task.workspacePath}`,
         `明确范围：${JSON.stringify(document.scope || "以任务目标和验收标准为边界")}`,
         `验收标准：\n${task.acceptanceCriteria.join("\n")}`,
         ...(["feature", "fix", "refactor"].includes(document.changeType) ? [
-          "开发交付：实现并验证后，在任务所属仓库创建或复用本任务审查请求。GitLab 使用 MR，并保存任务契约 mergeRequest.url；GitHub 使用 PR，并保存 pullRequest.url，供用户在 Codex 原生代码审查中检查。缺少远端或发布权限时登记缺失条件；不得用其他项目的审查请求代替，不自动合并或标记验收。",
+          "开发交付：实现并验证后，在任务所属仓库创建或复用本任务审查请求。GitLab 使用 MR，并保存任务契约 mergeRequest.url；GitHub 使用 PR，并保存 pullRequest.url，供用户直接在仓库中审查。缺少远端或发布权限时登记缺失条件；不得用其他项目的审查请求代替，不自动合并或标记验收。",
         ] : []),
-        `既有实质条件：${gate?.releaseCondition || "遵守合同中其他执行条件"}。本次拖动授予执行权限，不证明输入和资源已就绪；执行前仍需核实。`,
+        `既有实质条件：${gate?.releaseCondition || "遵守合同中其他执行条件"}。${automatic ? "依赖解除自动启动策略" : "本次拖动"}授予执行权限，不证明输入和资源已就绪；执行前仍需核实。`,
         `下一步：${task.next}`, "现在开始或继续执行以上绑定任务。遵守项目规则及其他实质执行门槛；不得扩展范围，不得自行标记已验收。",
       ].join("\n");
       try {
         const receipt = await reply({ ...request, reply: instruction }, context, task.session);
-        await save({ status: "running", blocker: "", startDispatch: { ...dispatch, state: "received", ...receipt } });
+        await save({ status: taskTransition("start-received"), blocker: "", startDispatch: { ...dispatch, state: "received", ...receipt } });
         return { status: "running", ...receipt, notice: "启动指令已由绑定 session 接收。" };
       } catch (error) {
-        await save({ status: "blocked", blocker: `${error.uncertain ? "启动结果不确定" : "启动失败"}：${error.message}；请打开所属对话核实，不会自动重发。`, startDispatch: { ...dispatch, state: error.uncertain ? "uncertain" : "failed", error: error.message } });
+        await save({ status: taskTransition("start-failed"), blocker: `${error.uncertain ? "启动结果不确定" : "启动失败"}：${error.message}；请打开所属对话核实，不会自动重发。`, startDispatch: { ...dispatch, state: error.uncertain ? "uncertain" : "failed", error: error.message } });
         throw error;
       }
     });
+    if (automatic) void promise.finally(() => operations.delete(request.requestId)).catch(() => {});
     writes = promise.catch(() => {});
     operations.set(request.requestId, { identity, promise });
     return promise;
   };
+  let reconciliation;
+  changeStatus.reconcile = (context) => {
+    if (reconciliation) return reconciliation;
+    reconciliation = (async () => {
+      const snapshot = await readSources();
+      const results = [];
+      for (const task of snapshot.tasks) {
+        if (task.status !== "blocked" || !dependenciesReady(task, snapshot.tasks)
+          || task.startDispatch && task.startDispatch.state !== "received") continue;
+        try {
+          const result = await changeStatus({ requestId: `dependency-${randomUUID()}`,
+            sourceId: task.sourceId, taskId: task.id, status: "running" }, context, { automatic: true });
+          if (!result.skipped) results.push({ taskId: task.id, ...result });
+        } catch (error) { results.push({ taskId: task.id, error: error.message }); }
+      }
+      return results;
+    })().finally(() => { reconciliation = null; });
+    return reconciliation;
+  };
+  return changeStatus;
 }
